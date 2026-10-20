@@ -1,0 +1,52 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+#
+# Deploys SyncBoard as two free services, with no changes to the app's source:
+#
+#   syncboard-backend   Express + Socket.io server (built from ./Dockerfile)
+#   syncboard-frontend  React SPA as a static site, built with the backend URL
+#                       baked in through VITE_BACKEND_URL — the variable
+#                       src/socket.js already reads.
+#
+# Deploy: Render Dashboard → New → Blueprint → select this repo.
+#
+# Notes
+#  - Free web services spin down after ~15 minutes idle; the next request takes
+#    roughly 30-60s to wake the container.
+#  - The backend keeps per-room state (users, strokes, notes) in process memory,
+#    so a single instance is required unless REDIS_URL is set. This Blueprint
+#    runs one instance, which is what the app expects by default.
+
+services:
+  - type: web
+    name: syncboard-backend
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+  - type: web
+    name: syncboard-frontend
+    runtime: static
+    # BACKEND_HOST is injected from the backend service below, so the client
+    # connects to the real public URL without anything being hardcoded here.
+    buildCommand: cd frontend && npm ci && VITE_BACKEND_URL="https://$BACKEND_HOST" npm run build
+    staticPublishPath: ./frontend/dist
+    # SyncBoard routes on real paths (/r/<roomId>) via history.pushState, so a
+    # shared room link has to return index.html for the SPA to pick it up.
+    # Render only applies a rewrite when no file exists at the requested path,
+    # so /assets/* keeps being served directly.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: BACKEND_HOST
+        fromService:
+          name: syncboard-backend
+          type: web
+          envVarKey: RENDER_EXTERNAL_HOSTNAME

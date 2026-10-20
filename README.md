@@ -163,5 +163,33 @@ docker run --rm -p 4000:4000 ghcr.io/syedalisaleem/syncboard:latest
 #   -e REDIS_URL=redis://host:6379
 ```
 
-No GitHub Pages deploy: every feature is a live Socket.io room, so a static-only host
-would render a whiteboard that can never sync. The container is the deployable artifact.
+No GitHub Pages deploy: every feature is a live Socket.io room, so a Pages-hosted
+whiteboard could never sync. Render runs both halves instead.
+
+## Deploy on Render
+
+[`render.yaml`](render.yaml) is a [Render Blueprint](https://render.com/docs/blueprint-spec)
+that creates two free services from this repo without changing a single source file:
+
+| Service | What it is |
+| --- | --- |
+| `syncboard-backend` | The Express + Socket.io server, built from [`Dockerfile`](Dockerfile), health-checked at `/health` |
+| `syncboard-frontend` | The React SPA, deployed as a static site |
+
+The static site is built with `VITE_BACKEND_URL` pointed at the backend's public hostname —
+the variable [`frontend/src/socket.js`](frontend/src/socket.js) already reads — so the client
+connects cross-origin, and the backend already permits it (`cors: { origin: '*' }` on both
+Express and Socket.io).
+
+**To deploy:** Render Dashboard → **New** → **Blueprint** → select this repository → **Apply**.
+Render creates both services and passes the backend's URL to the frontend build for you.
+
+Worth knowing:
+
+- Free web services spin down after ~15 minutes idle. The first visit afterwards takes
+  30–60 seconds to wake the backend.
+- Rooms are held in process memory, so the Blueprint runs a single instance — which is what
+  the app assumes by default. Attach a Render Key Value instance via `REDIS_URL` to fan out
+  across more than one.
+- `/*` rewrites to `/index.html` so a shared `/r/<roomId>` link resolves on a cold load.
+  Render skips the rewrite when a real file exists at the path, so `/assets/*` is unaffected.
